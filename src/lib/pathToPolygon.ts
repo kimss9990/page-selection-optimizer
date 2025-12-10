@@ -187,10 +187,8 @@ function parsePath(pathData: string): PathCommand[] {
       continue;
     }
 
-    const values = valuesStr
-      .split(/[\s,]+/)
-      .map(Number)
-      .filter(n => !isNaN(n));
+    // 개선된 숫자 파싱: "208.476-2.611" → [208.476, -2.611]
+    const values = parsePathNumbers(valuesStr);
 
     // Handle multiple coordinate pairs for same command
     const expectedValues = getExpectedValues(type);
@@ -207,6 +205,21 @@ function parsePath(pathData: string): PathCommand[] {
   }
 
   return commands;
+}
+
+/**
+ * SVG path 숫자 문자열 파싱
+ * 공백 없이 연속된 숫자 처리: "208.476-2.611" → [208.476, -2.611]
+ */
+function parsePathNumbers(str: string): number[] {
+  if (!str || str.trim() === '') return [];
+
+  // 숫자 매칭 정규식: 선택적 부호, 정수부, 선택적 소수부, 선택적 지수
+  const numberRegex = /[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?/g;
+  const matches = str.match(numberRegex);
+
+  if (!matches) return [];
+  return matches.map(Number).filter(n => !isNaN(n));
 }
 
 /**
@@ -374,13 +387,24 @@ function arcToPoints(
  */
 export function extractPolygonsFromSVG(svgElement: SVGElement, precision: number = 10): Polygon[] {
   const polygons: Polygon[] = [];
+  const allPoints: Point[] = []; // 열린 경로 처리용
 
   // path 요소 처리
   const paths = svgElement.querySelectorAll('path');
   paths.forEach(path => {
     const d = path.getAttribute('d');
     if (d) {
-      polygons.push(...pathToPolygon(d, precision));
+      const pathPolygons = pathToPolygon(d, precision);
+
+      // 닫힌 폴리곤(3점 이상)만 추가, 나머지는 점 수집
+      pathPolygons.forEach(poly => {
+        if (poly.length >= 3 && isClosedPolygon(poly)) {
+          polygons.push(poly);
+        } else {
+          // 열린 경로의 점들을 수집
+          allPoints.push(...poly);
+        }
+      });
     }
   });
 
@@ -403,7 +427,7 @@ export function extractPolygonsFromSVG(svgElement: SVGElement, precision: number
     if (points) {
       const polygon = parsePolygonPoints(points);
       if (polygon.length > 0) {
-        polygons.push(polygon);
+        allPoints.push(...polygon); // polyline은 열린 경로로 처리
       }
     }
   });
@@ -451,7 +475,275 @@ export function extractPolygonsFromSVG(svgElement: SVGElement, precision: number
     }
   });
 
+  // 닫힌 폴리곤이 없고 열린 경로만 있는 경우, 선분 연결 시도
+  if (polygons.length === 0 && allPoints.length >= 3) {
+    // 먼저 선분 연결로 닫힌 폴리곤 찾기 시도
+    const paths = svgElement.querySelectorAll('path');
+    const segments: Array<{ start: Point; end: Point }> = [];
+
+    paths.forEach(path => {
+      const d = path.getAttribute('d');
+      if (d) {
+        const pathSegments = extractLineSegments(d, precision);
+        segments.push(...pathSegments);
+      }
+    });
+
+    if (segments.length > 0) {
+      const closedPolygons = connectSegmentsToPolygons(segments);
+      if (closedPolygons.length > 0) {
+        // 가장 큰 폴리곤 사용 (외곽선일 가능성 높음)
+        const largest = closedPolygons.reduce((max, poly) =>
+          getPolygonAreaSimple(poly) > getPolygonAreaSimple(max) ? poly : max
+        );
+        polygons.push(largest);
+      }
+    }
+
+    // 여전히 없으면 Convex Hull fallback
+    if (polygons.length === 0) {
+      const hull = computeConvexHull(allPoints);
+      if (hull.length >= 3) {
+        polygons.push(hull);
+      }
+    }
+  }
+
   return polygons;
+}
+
+/**
+ * SVG path에서 선분(직선) 추출
+ */
+function extractLineSegments(pathData: string, _precision: number): Array<{ start: Point; end: Point }> {
+  const commands = parsePath(pathData);
+  const segments: Array<{ start: Point; end: Point }> = [];
+  let currentPoint: Point = { x: 0, y: 0 };
+  let startPoint: Point = { x: 0, y: 0 };
+
+  for (const cmd of commands) {
+    const prevPoint = { ...currentPoint };
+
+    switch (cmd.type) {
+      case 'M':
+        currentPoint = { x: cmd.values[0], y: cmd.values[1] };
+        startPoint = { ...currentPoint };
+        break;
+      case 'm':
+        currentPoint = { x: currentPoint.x + cmd.values[0], y: currentPoint.y + cmd.values[1] };
+        startPoint = { ...currentPoint };
+        break;
+      case 'L':
+        currentPoint = { x: cmd.values[0], y: cmd.values[1] };
+        segments.push({ start: prevPoint, end: currentPoint });
+        break;
+      case 'l':
+        currentPoint = { x: currentPoint.x + cmd.values[0], y: currentPoint.y + cmd.values[1] };
+        segments.push({ start: prevPoint, end: currentPoint });
+        break;
+      case 'H':
+        currentPoint = { x: cmd.values[0], y: currentPoint.y };
+        segments.push({ start: prevPoint, end: currentPoint });
+        break;
+      case 'h':
+        currentPoint = { x: currentPoint.x + cmd.values[0], y: currentPoint.y };
+        segments.push({ start: prevPoint, end: currentPoint });
+        break;
+      case 'V':
+        currentPoint = { x: currentPoint.x, y: cmd.values[0] };
+        segments.push({ start: prevPoint, end: currentPoint });
+        break;
+      case 'v':
+        currentPoint = { x: currentPoint.x, y: currentPoint.y + cmd.values[0] };
+        segments.push({ start: prevPoint, end: currentPoint });
+        break;
+      case 'C': {
+        const p0 = prevPoint;
+        const p3 = { x: cmd.values[4], y: cmd.values[5] };
+        // 베지어 곡선은 시작-끝 직선으로 근사
+        segments.push({ start: p0, end: p3 });
+        currentPoint = p3;
+        break;
+      }
+      case 'c': {
+        const p0 = prevPoint;
+        const p3 = { x: currentPoint.x + cmd.values[4], y: currentPoint.y + cmd.values[5] };
+        segments.push({ start: p0, end: p3 });
+        currentPoint = p3;
+        break;
+      }
+      case 'Z':
+      case 'z':
+        if (currentPoint.x !== startPoint.x || currentPoint.y !== startPoint.y) {
+          segments.push({ start: currentPoint, end: startPoint });
+        }
+        currentPoint = startPoint;
+        break;
+    }
+  }
+
+  return segments;
+}
+
+/**
+ * 선분들을 연결하여 닫힌 폴리곤 생성
+ */
+function connectSegmentsToPolygons(segments: Array<{ start: Point; end: Point }>): Polygon[] {
+  const tolerance = 3.0; // 3 unit 이내면 같은 점으로 간주 (Adobe AI export 오차 허용)
+  const polygons: Polygon[] = [];
+  const used = new Set<number>();
+
+  // 점 비교 함수
+  const pointsEqual = (a: Point, b: Point) =>
+    Math.abs(a.x - b.x) < tolerance && Math.abs(a.y - b.y) < tolerance;
+
+  // 각 선분에서 시작해서 연결된 경로 찾기
+  for (let i = 0; i < segments.length; i++) {
+    if (used.has(i)) continue;
+
+    const chain: Point[] = [segments[i].start, segments[i].end];
+    used.add(i);
+
+    let changed = true;
+    while (changed) {
+      changed = false;
+      const lastPoint = chain[chain.length - 1];
+      const firstPoint = chain[0];
+
+      // 닫혔는지 확인
+      if (chain.length >= 3 && pointsEqual(lastPoint, firstPoint)) {
+        chain.pop(); // 중복된 마지막 점 제거
+        polygons.push(chain);
+        break;
+      }
+
+      // 연결할 다음 선분 찾기
+      for (let j = 0; j < segments.length; j++) {
+        if (used.has(j)) continue;
+
+        const seg = segments[j];
+
+        if (pointsEqual(lastPoint, seg.start)) {
+          chain.push(seg.end);
+          used.add(j);
+          changed = true;
+          break;
+        } else if (pointsEqual(lastPoint, seg.end)) {
+          chain.push(seg.start);
+          used.add(j);
+          changed = true;
+          break;
+        }
+      }
+    }
+  }
+
+  return polygons;
+}
+
+/**
+ * 간단한 폴리곤 면적 계산 (Shoelace)
+ */
+function getPolygonAreaSimple(polygon: Polygon): number {
+  if (polygon.length < 3) return 0;
+  let area = 0;
+  const n = polygon.length;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    area += polygon[i].x * polygon[j].y;
+    area -= polygon[j].x * polygon[i].y;
+  }
+  return Math.abs(area) / 2;
+}
+
+/**
+ * 폴리곤이 닫혀있는지 확인 (첫점과 끝점이 가까운지)
+ */
+function isClosedPolygon(polygon: Polygon, threshold: number = 0.1): boolean {
+  if (polygon.length < 3) return false;
+  const first = polygon[0];
+  const last = polygon[polygon.length - 1];
+  const dx = Math.abs(first.x - last.x);
+  const dy = Math.abs(first.y - last.y);
+  return dx < threshold && dy < threshold;
+}
+
+/**
+ * Convex Hull 계산 (Graham Scan 알고리즘)
+ * 열린 경로의 점들로부터 외곽 다각형 생성
+ */
+function computeConvexHull(points: Point[]): Polygon {
+  if (points.length < 3) return points;
+
+  // 중복 제거
+  const uniquePoints = removeDuplicatePoints(points);
+  if (uniquePoints.length < 3) return uniquePoints;
+
+  // 가장 아래, 가장 왼쪽 점 찾기
+  let pivot = uniquePoints[0];
+  for (const p of uniquePoints) {
+    if (p.y < pivot.y || (p.y === pivot.y && p.x < pivot.x)) {
+      pivot = p;
+    }
+  }
+
+  // pivot 기준 각도로 정렬
+  const sorted = uniquePoints
+    .filter(p => p !== pivot)
+    .map(p => ({
+      point: p,
+      angle: Math.atan2(p.y - pivot.y, p.x - pivot.x),
+      dist: Math.hypot(p.x - pivot.x, p.y - pivot.y),
+    }))
+    .sort((a, b) => {
+      if (Math.abs(a.angle - b.angle) < 1e-10) {
+        return a.dist - b.dist;
+      }
+      return a.angle - b.angle;
+    })
+    .map(item => item.point);
+
+  // Graham Scan
+  const hull: Point[] = [pivot];
+
+  for (const p of sorted) {
+    while (hull.length >= 2) {
+      const top = hull[hull.length - 1];
+      const nextToTop = hull[hull.length - 2];
+      const cross = crossProduct(nextToTop, top, p);
+      if (cross <= 0) {
+        hull.pop();
+      } else {
+        break;
+      }
+    }
+    hull.push(p);
+  }
+
+  return hull;
+}
+
+/**
+ * 외적 계산 (방향 판단용)
+ */
+function crossProduct(o: Point, a: Point, b: Point): number {
+  return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+}
+
+/**
+ * 중복 점 제거
+ */
+function removeDuplicatePoints(points: Point[], threshold: number = 0.01): Point[] {
+  const result: Point[] = [];
+  for (const p of points) {
+    const isDuplicate = result.some(
+      existing => Math.abs(existing.x - p.x) < threshold && Math.abs(existing.y - p.y) < threshold
+    );
+    if (!isDuplicate) {
+      result.push(p);
+    }
+  }
+  return result;
 }
 
 /**

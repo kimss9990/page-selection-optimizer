@@ -1,6 +1,6 @@
 import type { Design, BoundingBox, Polygon } from '../types';
 import { extractPolygonsFromSVG } from './pathToPolygon';
-import { getPolygonsBoundingBox, getPolygonArea, normalizePolygon } from './geometryUtils';
+import { getPolygonsBoundingBox, getPolygonArea } from './geometryUtils';
 
 /**
  * SVG 파일 내용을 파싱하여 Design 객체로 변환
@@ -39,14 +39,27 @@ export function parseSVGContent(svgContent: string, name: string = 'design'): De
     throw new Error('SVG에서 도형을 찾을 수 없습니다.');
   }
 
-  // 바운딩 박스 계산
-  const boundingBox = getPolygonsBoundingBox(polygons);
+  // 전체 바운딩 박스 계산 (음수 좌표 포함)
+  const rawBoundingBox = getPolygonsBoundingBox(polygons);
 
-  // 정규화된 폴리곤 (원점 기준)
-  const normalizedPolygons = polygons.map(poly => normalizePolygon(poly));
+  // 모든 폴리곤을 동일한 오프셋으로 정규화 (원점 기준)
+  // 상대 위치 유지
+  const offsetX = rawBoundingBox.x;
+  const offsetY = rawBoundingBox.y;
+  const normalizedPolygons = polygons.map(poly =>
+    poly.map(p => ({ x: p.x - offsetX, y: p.y - offsetY }))
+  );
+
+  // 정규화된 바운딩 박스 (원점에서 시작)
+  const boundingBox = {
+    x: 0,
+    y: 0,
+    width: rawBoundingBox.width,
+    height: rawBoundingBox.height,
+  };
 
   // 총 면적 계산
-  const totalArea = polygons.reduce((sum, poly) => sum + getPolygonArea(poly), 0);
+  const totalArea = normalizedPolygons.reduce((sum, poly) => sum + getPolygonArea(poly), 0);
 
   return {
     id: generateId(),
