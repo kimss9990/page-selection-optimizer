@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="200mm" height="150mm" viewBox="0 0 200 150" xmlns="http://www.w3.org/2000/svg">
+  <!-- 박스 전개도 샘플: ㄱ자형 -->
+  <path
+    d="M 10 10
+       L 190 10
+       L 190 60
+       L 140 60
+       L 140 140
+       L 10 140
+       Z"
+    fill="none"
+    stroke="#333"
+    stroke-width="0.5"
+  />
+  <!-- 접는 선 (점선) -->
+  <line x1="10" y1="60" x2="140" y2="60" stroke="#999" stroke-width="0.3" stroke-dasharray="2,2"/>
+  <line x1="140" y1="10" x2="140" y2="60" stroke="#999" stroke-width="0.3" stroke-dasharray="2,2"/>
+</svg>

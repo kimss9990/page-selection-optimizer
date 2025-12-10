@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="120mm" height="80mm" viewBox="0 0 120 80" xmlns="http://www.w3.org/2000/svg">
+  <!-- 단순 직사각형 박스 전개도 -->
+  <rect x="5" y="5" width="110" height="70" fill="none" stroke="#333" stroke-width="0.5"/>
+  <!-- 접는 선 -->
+  <line x1="30" y1="5" x2="30" y2="75" stroke="#999" stroke-width="0.3" stroke-dasharray="2,2"/>
+  <line x1="90" y1="5" x2="90" y2="75" stroke="#999" stroke-width="0.3" stroke-dasharray="2,2"/>
+  <line x1="5" y1="25" x2="115" y2="25" stroke="#999" stroke-width="0.3" stroke-dasharray="2,2"/>
+  <line x1="5" y1="55" x2="115" y2="55" stroke="#999" stroke-width="0.3" stroke-dasharray="2,2"/>
+</svg>
