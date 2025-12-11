@@ -185,11 +185,20 @@ export function isBoundingBoxInside(inner: BoundingBox, outer: BoundingBox, marg
 }
 
 /**
- * 폴리곤을 정규화 (원점 기준으로 이동)
+ * 폴리곤을 정규화 (바운딩 박스 원점 기준으로 이동)
  */
 export function normalizePolygon(polygon: Polygon): Polygon {
   const bbox = getPolygonBoundingBox(polygon);
   return translatePolygon(polygon, -bbox.x, -bbox.y);
+}
+
+/**
+ * 폴리곤을 원점 기준으로 정규화 (첫 점이 원점)
+ */
+export function normalizePolygonToOrigin(polygon: Polygon): Polygon {
+  if (polygon.length === 0) return [];
+  const ref = polygon[0];
+  return polygon.map(p => ({ x: p.x - ref.x, y: p.y - ref.y }));
 }
 
 /**

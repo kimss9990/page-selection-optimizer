@@ -1,8 +1,9 @@
 import { useState, useCallback } from 'react';
-import type { Design, Placement } from '../../types';
+import type { Design, Placement, BoundingBox } from '../../types';
 import { useAppStore } from '../../stores/appStore';
 import { polygonsToSVGPath } from '../../lib/svgParser';
 import { rotatePolygon, translatePolygon, getPolygonsBoundingBox } from '../../lib/geometryUtils';
+import { doPolygonsCollide, isPolygonInsideBounds } from '../../lib/collisionDetection';
 import type { Point, Polygon } from '../../types';
 
 interface DesignLayerProps {
@@ -10,12 +11,58 @@ interface DesignLayerProps {
   placements: Placement[];
   scale: number;
   isManualMode: boolean;
+  paperBounds: BoundingBox;
+  margin: number;
 }
 
-export function DesignLayer({ design, placements, scale, isManualMode }: DesignLayerProps) {
+export function DesignLayer({ design, placements, scale, isManualMode, paperBounds, margin }: DesignLayerProps) {
   const updateManualPlacement = useAppStore(state => state.updateManualPlacement);
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
   const [dragStart, setDragStart] = useState<Point | null>(null);
+
+  // 폴리곤 변환 함수
+  const getTransformedPolygons = useCallback((placement: Placement): Polygon[] => {
+    const center: Point = {
+      x: design.boundingBox.width / 2,
+      y: design.boundingBox.height / 2,
+    };
+    return design.polygons.map(poly => {
+      let transformed = rotatePolygon(poly, placement.rotation, center);
+      transformed = translatePolygon(transformed, placement.x, placement.y);
+      return transformed;
+    });
+  }, [design]);
+
+  // 배치 유효성 검사
+  const isValidPlacement = useCallback((
+    newPlacement: Placement,
+    placementIndex: number
+  ): boolean => {
+    const newPolygons = getTransformedPolygons(newPlacement);
+    const edgeMargin = 2; // 종이 바깥쪽 여백 2mm 고정
+
+    // 종이 경계 내 확인 (바깥쪽 여백 2mm)
+    for (const poly of newPolygons) {
+      if (!isPolygonInsideBounds(poly, paperBounds, edgeMargin)) {
+        return false;
+      }
+    }
+
+    // 다른 배치와 충돌 확인 (실제 겹침만, margin 0)
+    for (let i = 0; i < placements.length; i++) {
+      if (i === placementIndex) continue;
+      const otherPolygons = getTransformedPolygons(placements[i]);
+      for (const poly of newPolygons) {
+        for (const otherPoly of otherPolygons) {
+          if (doPolygonsCollide(poly, otherPoly, 0)) {
+            return false;
+          }
+        }
+      }
+    }
+
+    return true;
+  }, [getTransformedPolygons, placements, paperBounds]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent, index: number) => {
     if (!isManualMode) return;
@@ -31,13 +78,22 @@ export function DesignLayer({ design, placements, scale, isManualMode }: DesignL
     const dy = (e.clientY - dragStart.y) / scale;
 
     const placement = placements[draggingIndex];
-    updateManualPlacement(draggingIndex, {
+    const newPlacement: Placement = {
+      ...placement,
       x: placement.x + dx,
       y: placement.y + dy,
-    });
+    };
 
-    setDragStart({ x: e.clientX, y: e.clientY });
-  }, [draggingIndex, dragStart, scale, placements, updateManualPlacement, isManualMode]);
+    // SAT 충돌 검사로 유효한 위치인지 확인
+    if (isValidPlacement(newPlacement, draggingIndex)) {
+      updateManualPlacement(draggingIndex, {
+        x: newPlacement.x,
+        y: newPlacement.y,
+      });
+      setDragStart({ x: e.clientX, y: e.clientY });
+    }
+    // 유효하지 않은 위치면 이동하지 않음 (도면이 현재 위치에 유지됨)
+  }, [draggingIndex, dragStart, scale, placements, updateManualPlacement, isManualMode, isValidPlacement]);
 
   const handleMouseUp = useCallback(() => {
     setDraggingIndex(null);
@@ -48,8 +104,13 @@ export function DesignLayer({ design, placements, scale, isManualMode }: DesignL
     if (!isManualMode) return;
     const placement = placements[index];
     const nextRotation = ((placement.rotation + 90) % 360) as 0 | 90 | 180 | 270;
-    updateManualPlacement(index, { rotation: nextRotation });
-  }, [placements, updateManualPlacement, isManualMode]);
+    const newPlacement: Placement = { ...placement, rotation: nextRotation };
+
+    // 회전 후에도 유효한 위치인지 확인
+    if (isValidPlacement(newPlacement, index)) {
+      updateManualPlacement(index, { rotation: nextRotation });
+    }
+  }, [placements, updateManualPlacement, isManualMode, isValidPlacement]);
 
   // 배치별 변환된 폴리곤 및 SVG path 생성
   const renderPlacements = placements.map((placement, index) => {

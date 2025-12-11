@@ -1,6 +1,7 @@
 import type { Design, Paper, Placement, NestingResult, Polygon, BoundingBox, Point } from '../types';
 import { doPolygonsCollide, isPolygonInsideBounds, getMinDistanceToBounds } from './collisionDetection';
-import { rotatePolygon, translatePolygon, getPolygonsBoundingBox } from './geometryUtils';
+import { rotatePolygon, translatePolygon, getPolygonsBoundingBox, normalizePolygonToOrigin } from './geometryUtils';
+import { computeNFP, computeIFP, findValidPositions, selectBottomLeftPosition } from './nfpAlgorithm';
 
 /**
  * 네스팅 엔진: 도면을 종이에 최적 배치
@@ -70,6 +71,18 @@ function nestOnPaper(design: Design, paper: Paper, margin: number): NestingResul
       count: mixedResult.placements.length,
     };
     bestPlacements = mixedResult.placements;
+  }
+
+  // NFP 기반 퍼즐 네스팅 시도 (오목한 부분에 끼워넣기)
+  const nfpResult = tryNFPNesting(design, paperBounds, margin);
+  if (nfpResult && (!bestResult || nfpResult.placements.length > bestResult.count)) {
+    bestResult = {
+      x: 0,
+      y: 0,
+      rotation: 0,
+      count: nfpResult.placements.length,
+    };
+    bestPlacements = nfpResult.placements;
   }
 
   if (!bestResult || bestPlacements.length === 0) {
@@ -186,7 +199,7 @@ function generatePlacements(
 }
 
 /**
- * 혼합 회전 배치 시도 (0도와 90도 조합)
+ * 혼합 회전 배치 시도 (0도와 90도 조합) - 그리드 기반
  */
 function tryMixedRotation(
   design: Design,
@@ -221,6 +234,139 @@ function tryMixedRotation(
           break; // 배치 성공하면 다음 위치로
         }
       }
+    }
+  }
+
+  if (placements.length === 0) {
+    return null;
+  }
+
+  return { placements };
+}
+
+/**
+ * NFP 기반 퍼즐 네스팅 - 오목한 부분에 끼워넣기 가능
+ */
+function tryNFPNesting(
+  design: Design,
+  paperBounds: BoundingBox,
+  margin: number
+): { placements: Placement[] } | null {
+  const placements: Placement[] = [];
+  const placedPolygons: Polygon[] = [];
+
+  // 여백이 적용된 종이 바운딩 박스
+  const effectiveBounds: BoundingBox = {
+    x: margin,
+    y: margin,
+    width: paperBounds.width - 2 * margin,
+    height: paperBounds.height - 2 * margin,
+  };
+
+  // 회전 각도별로 시도
+  const rotations: (0 | 90 | 180 | 270)[] = [0, 90, 180, 270];
+
+  // 도면을 원점 기준으로 정규화
+  const normalizedPolygons = design.polygons.map(poly => normalizePolygonToOrigin(poly));
+
+  // 모든 폴리곤을 하나로 합침 (가장 큰 폴리곤 사용)
+  const mainPolygon = normalizedPolygons.reduce((largest, poly) =>
+    poly.length > largest.length ? poly : largest, normalizedPolygons[0]);
+
+  // 그리드 스텝 - 더 세밀한 탐색을 위해 작게 설정
+  const gridStep = Math.max(1, Math.min(design.boundingBox.width, design.boundingBox.height) / 10);
+
+  // 최대 배치 개수 제한 (성능을 위해)
+  const maxPlacements = Math.ceil(
+    (effectiveBounds.width * effectiveBounds.height) / design.area
+  ) + 5;
+
+  while (placements.length < maxPlacements) {
+    let bestPosition: { x: number; y: number; rotation: 0 | 90 | 180 | 270 } | null = null;
+
+    // 각 회전에서 가장 좋은 위치 찾기
+    for (const rotation of rotations) {
+      const center: Point = { x: design.boundingBox.width / 2, y: design.boundingBox.height / 2 };
+      const rotatedPolygon = rotatePolygon(mainPolygon, rotation, center);
+      const normalizedRotated = normalizePolygonToOrigin(rotatedPolygon);
+
+      // IFP 계산 (종이 내부에 배치 가능한 영역)
+      const ifp = computeIFP(effectiveBounds, normalizedRotated);
+
+      if (ifp.length === 0) continue;
+
+      // 이미 배치된 폴리곤들에 대한 NFP 계산
+      const nfps: Polygon[] = [];
+      for (const placed of placedPolygons) {
+        const nfp = computeNFP(placed, normalizedRotated);
+        if (nfp.length > 0) {
+          nfps.push(nfp);
+        }
+      }
+
+      // 유효한 배치 위치 찾기
+      const validPositions = findValidPositions(ifp, nfps, gridStep);
+
+      if (validPositions.length === 0) continue;
+
+      // Bottom-Left 전략으로 최적 위치 선택
+      const position = selectBottomLeftPosition(validPositions);
+
+      if (position) {
+        // 이 위치가 실제로 유효한지 정밀 검사
+        const candidatePolygons = design.polygons.map(poly => {
+          let transformed = rotatePolygon(poly, rotation, center);
+          transformed = translatePolygon(transformed, position.x, position.y);
+          return transformed;
+        });
+
+        let isValid = true;
+
+        // 종이 경계 내 확인
+        for (const poly of candidatePolygons) {
+          if (!isPolygonInsideBounds(poly, paperBounds, margin)) {
+            isValid = false;
+            break;
+          }
+        }
+
+        // 기존 배치와 충돌 확인
+        if (isValid) {
+          for (const placed of placedPolygons) {
+            for (const poly of candidatePolygons) {
+              if (doPolygonsCollide(poly, placed, margin)) {
+                isValid = false;
+                break;
+              }
+            }
+            if (!isValid) break;
+          }
+        }
+
+        if (isValid && (!bestPosition || position.y < bestPosition.y ||
+            (position.y === bestPosition.y && position.x < bestPosition.x))) {
+          bestPosition = { x: position.x, y: position.y, rotation };
+        }
+      }
+    }
+
+    if (!bestPosition) break;
+
+    // 배치 추가
+    const center: Point = { x: design.boundingBox.width / 2, y: design.boundingBox.height / 2 };
+    const newPlacement: Placement = {
+      designId: design.id,
+      x: bestPosition.x,
+      y: bestPosition.y,
+      rotation: bestPosition.rotation,
+    };
+    placements.push(newPlacement);
+
+    // 배치된 폴리곤 추가
+    for (const poly of design.polygons) {
+      let transformed = rotatePolygon(poly, bestPosition.rotation, center);
+      transformed = translatePolygon(transformed, bestPosition.x, bestPosition.y);
+      placedPolygons.push(transformed);
     }
   }
 

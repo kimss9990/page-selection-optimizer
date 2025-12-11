@@ -6,42 +6,164 @@ import { getPolygonBoundingBox, doBoundingBoxesOverlap } from './geometryUtils';
  * 두 볼록 폴리곤 간의 충돌을 감지
  */
 export function doPolygonsCollide(polygonA: Polygon, polygonB: Polygon, margin: number = 0): boolean {
-  // 빠른 사전 검사: 바운딩 박스 충돌 확인
+  // 빠른 사전 검사: 바운딩 박스 충돌 확인 (margin 포함해서 넉넉하게)
   const bboxA = getPolygonBoundingBox(polygonA);
   const bboxB = getPolygonBoundingBox(polygonB);
 
   if (!doBoundingBoxesOverlap(bboxA, bboxB, margin)) {
-    return false;
+    return false; // 바운딩 박스가 겹치지 않으면 확실히 충돌 없음
   }
 
-  // margin이 있는 경우 폴리곤 확장
-  const expandedA = margin > 0 ? expandPolygon(polygonA, margin / 2) : polygonA;
-  const expandedB = margin > 0 ? expandPolygon(polygonB, margin / 2) : polygonB;
+  // margin이 있는 경우: 두 폴리곤 사이의 최소 거리가 margin보다 작은지 확인
+  if (margin > 0) {
+    const minDist = getMinPolygonDistance(polygonA, polygonB);
+    return minDist < margin;
+  }
 
-  // SAT 검사
-  return satCollisionCheck(expandedA, expandedB);
+  // margin이 0인 경우: SAT 검사로 실제 겹침 확인
+  return satCollisionCheck(polygonA, polygonB);
 }
 
 /**
- * SAT 충돌 검사 핵심 로직
+ * 두 폴리곤 사이의 최소 거리 계산
  */
-function satCollisionCheck(polygonA: Polygon, polygonB: Polygon): boolean {
-  const axesA = getAxes(polygonA);
-  const axesB = getAxes(polygonB);
+function getMinPolygonDistance(polygonA: Polygon, polygonB: Polygon): number {
+  // 먼저 실제 겹침 여부 확인 (SAT)
+  if (satCollisionCheck(polygonA, polygonB)) {
+    return 0; // 겹치면 거리 0
+  }
 
-  // 모든 축에 대해 분리 여부 확인
-  for (const axis of [...axesA, ...axesB]) {
-    const projA = projectPolygon(polygonA, axis);
-    const projB = projectPolygon(polygonB, axis);
+  let minDist = Infinity;
 
-    // 투영이 겹치지 않으면 분리됨 (충돌 없음)
-    if (!doProjectionsOverlap(projA, projB)) {
-      return false;
+  // A의 각 점에서 B의 각 엣지까지 거리
+  for (const pointA of polygonA) {
+    for (let i = 0; i < polygonB.length; i++) {
+      const p1 = polygonB[i];
+      const p2 = polygonB[(i + 1) % polygonB.length];
+      const dist = pointToSegmentDist(pointA, p1, p2);
+      minDist = Math.min(minDist, dist);
     }
   }
 
-  // 모든 축에서 겹치면 충돌
-  return true;
+  // B의 각 점에서 A의 각 엣지까지 거리
+  for (const pointB of polygonB) {
+    for (let i = 0; i < polygonA.length; i++) {
+      const p1 = polygonA[i];
+      const p2 = polygonA[(i + 1) % polygonA.length];
+      const dist = pointToSegmentDist(pointB, p1, p2);
+      minDist = Math.min(minDist, dist);
+    }
+  }
+
+  return minDist;
+}
+
+/**
+ * 점과 선분 사이 거리
+ */
+function pointToSegmentDist(point: Point, a: Point, b: Point): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lengthSq = dx * dx + dy * dy;
+
+  if (lengthSq === 0) {
+    return Math.hypot(point.x - a.x, point.y - a.y);
+  }
+
+  let t = ((point.x - a.x) * dx + (point.y - a.y) * dy) / lengthSq;
+  t = Math.max(0, Math.min(1, t));
+
+  const projX = a.x + t * dx;
+  const projY = a.y + t * dy;
+
+  return Math.hypot(point.x - projX, point.y - projY);
+}
+
+/**
+ * 오목 폴리곤도 지원하는 충돌 검사
+ * 1. 선분 교차 검사
+ * 2. 점 포함 검사 (한 폴리곤이 다른 폴리곤 안에 완전히 들어가는 경우)
+ */
+function satCollisionCheck(polygonA: Polygon, polygonB: Polygon): boolean {
+  // 1. 엣지 교차 검사 - 두 폴리곤의 변이 교차하면 충돌
+  for (let i = 0; i < polygonA.length; i++) {
+    const a1 = polygonA[i];
+    const a2 = polygonA[(i + 1) % polygonA.length];
+
+    for (let j = 0; j < polygonB.length; j++) {
+      const b1 = polygonB[j];
+      const b2 = polygonB[(j + 1) % polygonB.length];
+
+      if (doSegmentsIntersect(a1, a2, b1, b2)) {
+        return true;
+      }
+    }
+  }
+
+  // 2. 점 포함 검사 - 한 폴리곤이 다른 폴리곤 안에 완전히 들어가는 경우
+  if (isPointInPolygon(polygonA[0], polygonB) || isPointInPolygon(polygonB[0], polygonA)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * 두 선분이 교차하는지 확인
+ */
+function doSegmentsIntersect(a1: Point, a2: Point, b1: Point, b2: Point): boolean {
+  const d1 = direction(b1, b2, a1);
+  const d2 = direction(b1, b2, a2);
+  const d3 = direction(a1, a2, b1);
+  const d4 = direction(a1, a2, b2);
+
+  if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+      ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) {
+    return true;
+  }
+
+  // 공선(colinear) 케이스
+  if (d1 === 0 && onSegment(b1, b2, a1)) return true;
+  if (d2 === 0 && onSegment(b1, b2, a2)) return true;
+  if (d3 === 0 && onSegment(a1, a2, b1)) return true;
+  if (d4 === 0 && onSegment(a1, a2, b2)) return true;
+
+  return false;
+}
+
+/**
+ * 방향 계산 (외적)
+ */
+function direction(a: Point, b: Point, c: Point): number {
+  return (c.x - a.x) * (b.y - a.y) - (b.x - a.x) * (c.y - a.y);
+}
+
+/**
+ * 점 c가 선분 ab 위에 있는지 확인 (공선일 때)
+ */
+function onSegment(a: Point, b: Point, c: Point): boolean {
+  return Math.min(a.x, b.x) <= c.x && c.x <= Math.max(a.x, b.x) &&
+         Math.min(a.y, b.y) <= c.y && c.y <= Math.max(a.y, b.y);
+}
+
+/**
+ * 점이 폴리곤 내부에 있는지 확인 (Ray casting)
+ */
+function isPointInPolygon(point: Point, polygon: Polygon): boolean {
+  let inside = false;
+  const n = polygon.length;
+
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = polygon[i].x, yi = polygon[i].y;
+    const xj = polygon[j].x, yj = polygon[j].y;
+
+    if ((yi > point.y) !== (yj > point.y) &&
+        point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+
+  return inside;
 }
 
 /**
@@ -92,47 +214,6 @@ function projectPolygon(polygon: Polygon, axis: Point): { min: number; max: numb
  */
 function doProjectionsOverlap(a: { min: number; max: number }, b: { min: number; max: number }): boolean {
   return !(a.max < b.min || b.max < a.min);
-}
-
-/**
- * 폴리곤을 특정 거리만큼 확장 (간단한 Minkowski sum 근사)
- */
-function expandPolygon(polygon: Polygon, distance: number): Polygon {
-  if (distance <= 0) return polygon;
-
-  const center = getPolygonCenter(polygon);
-  const expanded: Polygon = [];
-
-  for (const point of polygon) {
-    const dx = point.x - center.x;
-    const dy = point.y - center.y;
-    const length = Math.sqrt(dx * dx + dy * dy);
-
-    if (length > 0) {
-      expanded.push({
-        x: point.x + (dx / length) * distance,
-        y: point.y + (dy / length) * distance,
-      });
-    } else {
-      expanded.push(point);
-    }
-  }
-
-  return expanded;
-}
-
-/**
- * 폴리곤 중심점 계산
- */
-function getPolygonCenter(polygon: Polygon): Point {
-  const sum = polygon.reduce(
-    (acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }),
-    { x: 0, y: 0 }
-  );
-  return {
-    x: sum.x / polygon.length,
-    y: sum.y / polygon.length,
-  };
 }
 
 /**
