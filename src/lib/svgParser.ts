@@ -42,24 +42,36 @@ export function parseSVGContent(svgContent: string, name: string = 'design'): De
   // Paper.js가 SVG의 width/height를 인식하여 자동으로 mm 단위로 변환함
   let polygons = extractPolygonsFromSVG(svgElement, 0.5);
 
-  // Paper.js가 viewBox 크기의 사각형을 추가로 생성하는 경우 필터링
-  // viewBox와 동일한 크기의 단순 사각형(4꼭지점)은 제외
+  // Paper.js가 viewBox/캔버스 크기의 사각형을 추가로 생성하는 경우 필터링
+  // 실제 mm 크기 또는 viewBox 크기와 동일한 단순 사각형(4꼭지점)은 제외
   if (polygons.length > 1) {
+    // 비교할 크기들: viewBox 원본, mm 변환 크기
+    const sizesToFilter = [
+      { width: viewBox.width, height: viewBox.height },
+    ];
+    if (realSizeMM) {
+      sizesToFilter.push({ width: realSizeMM.width, height: realSizeMM.height });
+    }
+
     polygons = polygons.filter(poly => {
       // 4꼭지점 사각형만 검사
       if (poly.length !== 4) return true;
 
-      // viewBox 크기와 동일한지 확인
+      // 바운딩 박스 계산
       const bbox = getPolygonsBoundingBox([poly]);
-      const isViewBoxRect =
-        Math.abs(bbox.x - viewBox.x) < 1 &&
-        Math.abs(bbox.y - viewBox.y) < 1 &&
-        Math.abs(bbox.width - viewBox.width) < 1 &&
-        Math.abs(bbox.height - viewBox.height) < 1;
 
-      if (isViewBoxRect) {
-        console.log('viewBox 사각형 필터링됨:', poly);
-        return false;
+      // 알려진 크기들과 비교
+      for (const size of sizesToFilter) {
+        const isBackgroundRect =
+          Math.abs(bbox.x) < 1 &&
+          Math.abs(bbox.y) < 1 &&
+          Math.abs(bbox.width - size.width) < 1 &&
+          Math.abs(bbox.height - size.height) < 1;
+
+        if (isBackgroundRect) {
+          console.log('배경 사각형 필터링됨:', { bbox, matchedSize: size });
+          return false;
+        }
       }
       return true;
     });

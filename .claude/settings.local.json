@@ -2,11 +2,28 @@
   "permissions": {
     "allow": [
       "Bash(npx tsc --noEmit)",
-      "Bash(npm run build:*)"
+      "Bash(npm run build:*)",
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_file_upload",
+      "mcp__playwright__browser_take_screenshot",
+      "mcp__playwright__browser_snapshot",
+      "mcp__playwright__browser_click",
+      "mcp__playwright__browser_run_code",
+      "mcp__playwright__browser_console_messages",
+      "Bash(gcloud monitoring alerting policies list:*)",
+      "Bash(gcloud monitoring uptime list-configs:*)",
+      "Bash(gcloud logging metrics list:*)",
+      "Bash(gcloud monitoring notification-channels:*)",
+      "Bash(gcloud alpha monitoring policies list:*)",
+      "Bash(gcloud monitoring dashboards list:*)",
+      "Bash(gcloud alpha monitoring channels list:*)",
+      "Bash(gcloud alpha monitoring services list:*)",
+      "Bash(gcloud services list:*)",
+      "Bash(curl -s -H 'Authorization: Bearer $(gcloud auth print-access-token)' https://monitoring.googleapis.com/v3/projects/bigdata-wp-data-dev/services)"
     ]
   },
+  "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
     "puppeteer"
-  ],
-  "enableAllProjectMcpServers": true
+  ]
 }
