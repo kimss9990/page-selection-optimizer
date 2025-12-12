@@ -39,17 +39,11 @@ export function parseSVGContent(svgContent: string, name: string = 'design'): De
     : 1;
 
   // 폴리곤 추출 (SVG의 모든 도형 요소를 폴리곤으로 변환)
-  let polygons = extractPolygonsFromSVG(svgElement, 20);
+  // Paper.js가 SVG의 width/height를 인식하여 자동으로 mm 단위로 변환함
+  const polygons = extractPolygonsFromSVG(svgElement, 0.5);
 
   if (polygons.length === 0) {
     throw new Error('SVG에서 도형을 찾을 수 없습니다.');
-  }
-
-  // viewBox 좌표를 mm로 변환
-  if (scaleToMM !== 1) {
-    polygons = polygons.map(poly =>
-      poly.map(p => ({ x: p.x * scaleToMM, y: p.y * scaleToMM }))
-    );
   }
 
   // 전체 바운딩 박스 계산 (음수 좌표 포함)
