@@ -16,7 +16,7 @@ import {
   getCachedNFP,
   setCachedNFP,
 } from './nfpGenerator';
-import { rotatePolygon, translatePolygon, getPolygonsBoundingBox, normalizePolygonToOrigin } from './geometryUtils';
+import { rotatePolygon, translatePolygon, getPolygonsBoundingBox, normalizePolygonToOrigin, rotatePoint } from './geometryUtils';
 import { doPolygonsCollide } from './collisionDetection';
 
 // 진행률 콜백 타입
@@ -343,6 +343,8 @@ export async function nestWithNFP(
 
   // 배치된 도형들
   const placedParts: Array<{ polygon: Polygon; position: Point; id: string; rotation: number }> = [];
+  // 실제 렌더링된 폴리곤 저장 (충돌 검사용)
+  const placedRenderedPolygons: Polygon[][] = [];
 
   // 최대 배치 개수 추정
   const maxPlacements = Math.ceil(
@@ -406,12 +408,9 @@ export async function nestWithNFP(
     }
 
     // 정밀 충돌 검사
-    const transformedPolygons = design.polygons.map(poly => {
-      const center = { x: design.boundingBox.width / 2, y: design.boundingBox.height / 2 };
-      let transformed = rotatePolygon(poly, bestRotation, center);
-      transformed = translatePolygon(transformed, bestPosition!.x, bestPosition!.y);
-      return transformed;
-    });
+    // bestRotatedPart는 이미 원점 기준으로 회전된 폴리곤
+    // 이를 bestPosition으로 이동하여 충돌 검사
+    const transformedPolygons = [translatePolygon(bestRotatedPart, bestPosition.x, bestPosition.y)];
 
     // 경계 검사
     const bbox = getPolygonsBoundingBox(transformedPolygons);
@@ -423,14 +422,17 @@ export async function nestWithNFP(
 
     // 기존 배치와 충돌 검사
     // 주의: NFP 확장에서 이미 margin을 적용했으므로 여기서는 0 사용
+    // 동일한 폴리곤 표현(렌더링된 폴리곤)으로 비교
     let hasCollision = false;
-    for (const placed of placedParts) {
-      const placedTransformed = translatePolygon(placed.polygon, placed.position.x, placed.position.y);
-      for (const poly of transformedPolygons) {
-        if (doPolygonsCollide(poly, placedTransformed, 0)) {
-          hasCollision = true;
-          break;
+    for (const placedPolys of placedRenderedPolygons) {
+      for (const placedPoly of placedPolys) {
+        for (const poly of transformedPolygons) {
+          if (doPolygonsCollide(poly, placedPoly, 0)) {
+            hasCollision = true;
+            break;
+          }
         }
+        if (hasCollision) break;
       }
       if (hasCollision) break;
     }
@@ -440,10 +442,22 @@ export async function nestWithNFP(
     }
 
     // 배치 추가
+    // 렌더러는 design.polygons를 design center 기준으로 회전 후 offset 적용
+    // bestPosition은 원점 기준 폴리곤의 기준점(0,0)이 갈 위치
+    // 렌더러 좌표계로 변환 필요
+    const designCenter = {
+      x: design.boundingBox.width / 2,
+      y: design.boundingBox.height / 2,
+    };
+    const firstPoint = design.polygons[0][0];
+    const rotatedFirstPoint = rotatePoint(firstPoint, bestRotation, designCenter);
+
+    // 변환된 위치: bestPosition = rotatedFirstPoint + offset
+    // offset = bestPosition - rotatedFirstPoint
     const placement: Placement = {
       designId: design.id,
-      x: bestPosition.x,
-      y: bestPosition.y,
+      x: bestPosition.x - rotatedFirstPoint.x,
+      y: bestPosition.y - rotatedFirstPoint.y,
       rotation: (bestRotation % 360) as 0 | 90 | 180 | 270,
     };
     placements.push(placement);
@@ -456,6 +470,9 @@ export async function nestWithNFP(
       id: partId,
       rotation: bestRotation,
     });
+
+    // 렌더링된 폴리곤 저장 (충돌 검사용 - 원점 기준 폴리곤 + 위치 이동)
+    placedRenderedPolygons.push(transformedPolygons);
   }
 
   if (onProgress) {

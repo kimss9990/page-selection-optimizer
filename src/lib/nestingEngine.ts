@@ -756,19 +756,19 @@ async function nestOnPaperWithNFP(
     let placements: Placement[];
 
     if (useGA) {
-      // GA 기반 최적화
-      const gaGenerations = 50;
+      // GA 기반 최적화 (빠른 수렴을 위한 최적화된 파라미터)
+      const gaGenerations = 20;
       const gaResult = await nestWithGA(
         design,
         paperBounds,
         margin,
         {
-          populationSize: 40,
+          populationSize: 15,
           generations: gaGenerations,
-          mutationRate: 0.12,
-          crossoverRate: 0.85,
-          eliteCount: 3,
-          tournamentSize: 4,
+          mutationRate: 0.2,
+          crossoverRate: 0.7,
+          eliteCount: 2,
+          tournamentSize: 3,
           rotationAngles: [0, 90, 180, 270],
         },
         (generation, bestFitness, message) => {

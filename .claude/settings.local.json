@@ -19,7 +19,10 @@
       "Bash(gcloud alpha monitoring channels list:*)",
       "Bash(gcloud alpha monitoring services list:*)",
       "Bash(gcloud services list:*)",
-      "Bash(curl -s -H 'Authorization: Bearer $(gcloud auth print-access-token)' https://monitoring.googleapis.com/v3/projects/bigdata-wp-data-dev/services)"
+      "Bash(curl -s -H 'Authorization: Bearer $(gcloud auth print-access-token)' https://monitoring.googleapis.com/v3/projects/bigdata-wp-data-dev/services)",
+      "Bash(kubectl cp:*)",
+      "Bash(kubectl exec:*)",
+      "Bash(npm install:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

@@ -322,6 +322,7 @@ function getShapeId(polygon: Polygon): string {
 
 /**
  * 염색체 적합도 평가 (실제 배치 시뮬레이션)
+ * nfpPlacer.ts와 동일한 구조 사용
  */
 function evaluateFitness(
   chromosome: Chromosome,
@@ -333,8 +334,10 @@ function evaluateFitness(
   margin: number
 ): { fitness: number; placements: Placement[] } {
   const placements: Placement[] = [];
-  // 배치된 모든 폴리곤 저장 (충돌 검사용)
-  const placedPolygons: Polygon[] = [];
+  // 실제 렌더링된 폴리곤 저장 (충돌 검사용)
+  const placedRenderedPolygons: Polygon[] = [];
+  // NFP 계산용 (원점 기준 폴리곤 + 위치)
+  const placedParts: Array<{ polygon: Polygon; position: Point }> = [];
 
   // 최대 배치 개수
   const maxPlacements = Math.ceil(
@@ -346,11 +349,10 @@ function evaluateFitness(
     const geneIdx = i % chromosome.genes.length;
     const rotation = chromosome.genes[geneIdx].rotation;
 
-    // 회전된 도형 준비
-    const center = { x: 0, y: 0 };
+    // 회전된 도형 준비 (원점 기준)
     const rotatedPart = rotation === 0
       ? normalizedPart
-      : normalizePolygonToOrigin(rotatePolygon(normalizedPart, rotation, center));
+      : normalizePolygonToOrigin(rotatePolygon(normalizedPart, rotation, { x: 0, y: 0 }));
 
     // IFP 계산
     const ifpPolygon = computeRectBinIFP(effectiveBounds, rotatedPart);
@@ -358,12 +360,14 @@ function evaluateFitness(
 
     const binIFP = [ifpPolygon];
 
-    // 배치된 도형들의 NFP 계산
+    // 배치된 도형들의 NFP 계산 (nfpPlacer와 동일)
     const allNFPs: Polygon[] = [];
-    for (const placedPoly of placedPolygons) {
-      const nfpPolygons = computeNFP(placedPoly, rotatedPart);
+    for (const placed of placedParts) {
+      const nfpPolygons = computeNFP(placed.polygon, rotatedPart);
       for (const nfp of nfpPolygons) {
-        allNFPs.push(nfp);
+        // NFP를 배치된 위치로 이동
+        const translatedNFP = translatePolygon(nfp, placed.position.x, placed.position.y);
+        allNFPs.push(translatedNFP);
       }
     }
 
@@ -383,23 +387,24 @@ function evaluateFitness(
 
     if (validArea.length === 0) break;
 
-    // 적응형 그리드 스텝 (더 세밀하게)
+    // 적응형 그리드 스텝
     const areaBbox = getPolygonBBox(validArea[0] || []);
     const areaSize = (areaBbox.maxX - areaBbox.minX) * (areaBbox.maxY - areaBbox.minY);
-    const gridStep = Math.max(1, Math.sqrt(areaSize / 100000));
+    const gridStep = Math.max(2, Math.sqrt(areaSize / 50000));
 
     // Bottom-Left 위치 찾기
     const position = findBottomLeftPosition(validArea, gridStep);
     if (!position) break;
 
-    // 경계 검사
+    // 실제 렌더링될 폴리곤으로 검증 (nfpPlacer와 동일)
+    const designCenter = { x: design.boundingBox.width / 2, y: design.boundingBox.height / 2 };
     const transformedPolygons = design.polygons.map(poly => {
-      const c = { x: design.boundingBox.width / 2, y: design.boundingBox.height / 2 };
-      let transformed = rotatePolygon(poly, rotation, c);
+      let transformed = rotatePolygon(poly, rotation, designCenter);
       transformed = translatePolygon(transformed, position.x, position.y);
       return transformed;
     });
 
+    // 경계 검사 (실제 렌더링될 폴리곤 기준)
     let outOfBounds = false;
     for (const poly of transformedPolygons) {
       const bbox = getPolygonBBox(poly);
@@ -410,12 +415,11 @@ function evaluateFitness(
         break;
       }
     }
-
     if (outOfBounds) continue;
 
-    // 충돌 검사 (NFP가 이미 margin을 처리했으므로 margin=0)
+    // 충돌 검사 (동일한 폴리곤 표현으로 비교)
     let hasCollision = false;
-    for (const placedPoly of placedPolygons) {
+    for (const placedPoly of placedRenderedPolygons) {
       for (const poly of transformedPolygons) {
         if (doPolygonsCollide(poly, placedPoly, 0)) {
           hasCollision = true;
@@ -424,7 +428,6 @@ function evaluateFitness(
       }
       if (hasCollision) break;
     }
-
     if (hasCollision) continue;
 
     // 배치 추가
@@ -435,9 +438,15 @@ function evaluateFitness(
       rotation: (rotation % 360) as 0 | 90 | 180 | 270,
     });
 
-    // 배치된 폴리곤 저장 (이미 변환된 상태)
+    // NFP 계산용 저장 (원점 기준 폴리곤 + 위치)
+    placedParts.push({
+      polygon: rotatedPart,
+      position: position,
+    });
+
+    // 충돌 검사용 저장 (실제 렌더링 폴리곤)
     for (const poly of transformedPolygons) {
-      placedPolygons.push(poly);
+      placedRenderedPolygons.push(poly);
     }
   }
 
