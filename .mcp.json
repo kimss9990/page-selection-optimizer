@@ -1,8 +1,10 @@
 {
   "mcpServers": {
-    "puppeteer": {
+    "playwright": {
       "command": "npx",
-      "args": ["-y", "@anthropic-ai/mcp-server-puppeteer@latest"]
+      "args": [
+        "@playwright/mcp@latest"
+      ]
     }
   }
 }

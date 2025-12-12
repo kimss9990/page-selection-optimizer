@@ -32,11 +32,24 @@ export function parseSVGContent(svgContent: string, name: string = 'design'): De
   // viewBox 추출
   const viewBox = parseViewBox(svgElement);
 
+  // 실제 mm 크기와 viewBox 비율 계산
+  const realSizeMM = getRealSizeInMM(svgElement);
+  const scaleToMM = realSizeMM
+    ? realSizeMM.width / viewBox.width
+    : 1;
+
   // 폴리곤 추출 (SVG의 모든 도형 요소를 폴리곤으로 변환)
-  const polygons = extractPolygonsFromSVG(svgElement, 20);
+  let polygons = extractPolygonsFromSVG(svgElement, 20);
 
   if (polygons.length === 0) {
     throw new Error('SVG에서 도형을 찾을 수 없습니다.');
+  }
+
+  // viewBox 좌표를 mm로 변환
+  if (scaleToMM !== 1) {
+    polygons = polygons.map(poly =>
+      poly.map(p => ({ x: p.x * scaleToMM, y: p.y * scaleToMM }))
+    );
   }
 
   // 전체 바운딩 박스 계산 (음수 좌표 포함)
@@ -58,6 +71,14 @@ export function parseSVGContent(svgContent: string, name: string = 'design'): De
     height: rawBoundingBox.height,
   };
 
+  // viewBox도 mm 기준으로 변환
+  const viewBoxInMM = {
+    x: viewBox.x * scaleToMM,
+    y: viewBox.y * scaleToMM,
+    width: viewBox.width * scaleToMM,
+    height: viewBox.height * scaleToMM,
+  };
+
   // 총 면적 계산
   const totalArea = normalizedPolygons.reduce((sum, poly) => sum + getPolygonArea(poly), 0);
 
@@ -65,11 +86,39 @@ export function parseSVGContent(svgContent: string, name: string = 'design'): De
     id: generateId(),
     name: name.replace(/\.svg$/i, ''),
     svgContent,
-    viewBox,
+    viewBox: viewBoxInMM,
     boundingBox,
     polygons: normalizedPolygons,
     area: totalArea,
   };
+}
+
+/**
+ * SVG에서 실제 크기(mm)를 추출
+ * width="108.33mm" height="108.33mm" 같은 형식에서 mm 값 추출
+ */
+function getRealSizeInMM(svgElement: SVGSVGElement): { width: number; height: number } | null {
+  const widthAttr = svgElement.getAttribute('width') || '';
+  const heightAttr = svgElement.getAttribute('height') || '';
+
+  // 단위와 숫자 분리
+  const widthMatch = widthAttr.match(/^([\d.]+)(mm|cm|in|pt|pc|px)?$/i);
+  const heightMatch = heightAttr.match(/^([\d.]+)(mm|cm|in|pt|pc|px)?$/i);
+
+  if (!widthMatch || !heightMatch) {
+    return null;
+  }
+
+  const widthValue = parseFloat(widthMatch[1]);
+  const heightValue = parseFloat(heightMatch[1]);
+  const widthUnit = (widthMatch[2] || 'px').toLowerCase();
+  const heightUnit = (heightMatch[2] || 'px').toLowerCase();
+
+  // mm로 변환
+  const widthMM = widthValue * getUnitScale(widthUnit);
+  const heightMM = heightValue * getUnitScale(heightUnit);
+
+  return { width: widthMM, height: heightMM };
 }
 
 /**
