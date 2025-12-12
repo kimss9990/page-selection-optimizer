@@ -1,10 +1,11 @@
 import { create } from 'zustand';
-import type { AppState, AppActions, Design, NestingResult, Placement, Point } from '../types';
+import type { AppState, AppActions, Design, NestingResult, Placement, Point, NestingAlgorithm } from '../types';
 import { paperPresets } from '../lib/paperPresets';
 
 const initialState: AppState = {
   margin: 3, // 기본 여백 3mm
   selectedPapers: paperPresets.map(p => p.id), // 기본적으로 모든 종이 선택
+  algorithm: 'fast', // 기본 알고리즘
   design: null,
   results: [],
   selectedResultIndex: 0,
@@ -20,6 +21,8 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
   setMargin: (margin: number) => set({ margin }),
 
   setSelectedPapers: (papers: string[]) => set({ selectedPapers: papers }),
+
+  setAlgorithm: (algorithm: NestingAlgorithm) => set({ algorithm }),
 
   togglePaper: (paperId: string) => {
     const { selectedPapers } = get();

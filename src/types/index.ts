@@ -4,6 +4,24 @@ export interface Point {
   y: number;
 }
 
+// 알고리즘 타입
+export type NestingAlgorithm = 'fast' | 'nfp' | 'nfp-ga';
+
+export const ALGORITHM_INFO: Record<NestingAlgorithm, { name: string; description: string }> = {
+  fast: {
+    name: '빠른 분석',
+    description: '바운딩 박스 기반, 빠르지만 덜 정밀',
+  },
+  nfp: {
+    name: 'NFP 분석',
+    description: 'Minkowski Sum 기반, 정밀하지만 느림',
+  },
+  'nfp-ga': {
+    name: 'NFP + GA',
+    description: '유전 알고리즘으로 최적화, 가장 정밀',
+  },
+};
+
 export interface BoundingBox {
   x: number;
   y: number;
@@ -61,6 +79,7 @@ export interface AppState {
   // 설정
   margin: number;           // 여백 (mm)
   selectedPapers: string[]; // 선택된 종이 ID 목록
+  algorithm: NestingAlgorithm; // 네스팅 알고리즘
 
   // 도면
   design: Design | null;
@@ -83,6 +102,7 @@ export interface AppActions {
   setMargin: (margin: number) => void;
   setSelectedPapers: (papers: string[]) => void;
   togglePaper: (paperId: string) => void;
+  setAlgorithm: (algorithm: NestingAlgorithm) => void;
   setDesign: (design: Design | null) => void;
   setResults: (results: NestingResult[]) => void;
   selectResult: (index: number) => void;
