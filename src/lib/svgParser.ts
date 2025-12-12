@@ -40,7 +40,36 @@ export function parseSVGContent(svgContent: string, name: string = 'design'): De
 
   // 폴리곤 추출 (SVG의 모든 도형 요소를 폴리곤으로 변환)
   // Paper.js가 SVG의 width/height를 인식하여 자동으로 mm 단위로 변환함
-  const polygons = extractPolygonsFromSVG(svgElement, 0.5);
+  let polygons = extractPolygonsFromSVG(svgElement, 0.5);
+
+  // Paper.js가 viewBox 크기의 사각형을 추가로 생성하는 경우 필터링
+  // viewBox와 동일한 크기의 단순 사각형(4꼭지점)은 제외
+  if (polygons.length > 1) {
+    polygons = polygons.filter(poly => {
+      // 4꼭지점 사각형만 검사
+      if (poly.length !== 4) return true;
+
+      // viewBox 크기와 동일한지 확인
+      const bbox = getPolygonsBoundingBox([poly]);
+      const isViewBoxRect =
+        Math.abs(bbox.x - viewBox.x) < 1 &&
+        Math.abs(bbox.y - viewBox.y) < 1 &&
+        Math.abs(bbox.width - viewBox.width) < 1 &&
+        Math.abs(bbox.height - viewBox.height) < 1;
+
+      if (isViewBoxRect) {
+        console.log('viewBox 사각형 필터링됨:', poly);
+        return false;
+      }
+      return true;
+    });
+  }
+
+  // 디버그: 필터링 후 폴리곤 정보 출력
+  console.log('최종 폴리곤:', {
+    count: polygons.length,
+    vertices: polygons.map((p, i) => ({ polygon: i, vertexCount: p.length, points: p })),
+  });
 
   if (polygons.length === 0) {
     throw new Error('SVG에서 도형을 찾을 수 없습니다.');

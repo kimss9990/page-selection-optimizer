@@ -15,7 +15,7 @@ interface DesignLayerProps {
   margin: number;
 }
 
-export function DesignLayer({ design, placements, scale, isManualMode, paperBounds, margin }: DesignLayerProps) {
+export function DesignLayer({ design, placements, scale, isManualMode, paperBounds, margin: _margin }: DesignLayerProps) {
   const updateManualPlacement = useAppStore(state => state.updateManualPlacement);
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
   const [dragStart, setDragStart] = useState<Point | null>(null);

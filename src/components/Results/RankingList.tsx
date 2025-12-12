@@ -102,7 +102,7 @@ export function RankingList() {
             <div className="flex justify-between">
               <span className="text-gray-500">손실률</span>
               <span className="text-gray-800">
-                {(100 - results[selectedResultIndex].efficiency).toFixed(1)}%
+                {((results[selectedResultIndex].wastedArea / (results[selectedResultIndex].paperWidth * results[selectedResultIndex].paperHeight)) * 100).toFixed(1)}%
               </span>
             </div>
           </div>
